@@ -307,8 +307,7 @@ class DiTPrefix(nn.Module):
         condition: (N, T) tensor of semantic tokens
         seq_len: (N,) tensor of sequence lengths
         """
-
-        condition = self.semantic_token_embedding(condition)  # (N, T, D)
+        condition = self.semantic_token_embedding(condition)  # (N, T, D) (1, 120, 2304)
 
         x = self.input_linear(x)
 

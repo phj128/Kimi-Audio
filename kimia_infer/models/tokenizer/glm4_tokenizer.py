@@ -31,5 +31,5 @@ class Glm4Tokenizer(nn.Module):
         audio_tokens = extract_speech_token(
             self.whisper_model, self.feature_extractor, [audio_info]
         )[0]
-        audio_tokens = torch.tensor(audio_tokens).unsqueeze(0)
+        audio_tokens = torch.tensor(audio_tokens).unsqueeze(0) # (1, 125)
         return audio_tokens

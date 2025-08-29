@@ -5,6 +5,7 @@ import torch
 from loguru import logger
 from huggingface_hub import cached_assets_path
 from transformers import AutoModelForCausalLM
+from kimia_infer.modeling.modeling_moonshot_kimia import MoonshotKimiaForCausalLM
 
 from kimia_infer.models.detokenizer import get_audio_detokenizer
 from .prompt_manager import KimiAPromptManager
@@ -20,18 +21,18 @@ class KimiAudio(object):
             cache_path = model_path
         else:
             # cache everything if model_path is a model-id
-            cache_path = snapshot_download(model_path)
+            cache_path = snapshot_download(model_path, local_dir="pretrained_models/Kimi-Audio-7B-Instruct")
     
         logger.info(f"Looking for resources in {cache_path}")
         logger.info(f"Loading whisper model")
-        self.alm = AutoModelForCausalLM.from_pretrained(
+        self.alm = MoonshotKimiaForCausalLM.from_pretrained(
             cache_path, torch_dtype=torch.bfloat16, trust_remote_code=True
         )
         self.alm = self.alm.to(torch.cuda.current_device())
 
         model_config = self.alm.config
-        self.kimia_text_audiodelaytokens = model_config.kimia_mimo_audiodelaytokens
-        self.kimia_token_offset = model_config.kimia_token_offset
+        self.kimia_text_audiodelaytokens = model_config.kimia_mimo_audiodelaytokens # 6
+        self.kimia_token_offset = model_config.kimia_token_offset # 152064
 
         self.prompt_manager = KimiAPromptManager(
             model_path=cache_path, kimia_token_offset=self.kimia_token_offset, kimia_text_audiodelaytokens=self.kimia_text_audiodelaytokens
@@ -229,14 +230,14 @@ class KimiAudio(object):
 
         history = self.prompt_manager.get_prompt(chats, output_type=output_type)
 
-        audio_input_ids, text_input_ids, is_continuous_mask, _, _ = history.to_tensor()
-        audio_features = history.continuous_feature
+        audio_input_ids, text_input_ids, is_continuous_mask, _, _ = history.to_tensor() # (1, 147), (1, 147), (1, 147)
+        audio_features = history.continuous_feature # [(1, 125, 5120)]
 
         generated_wav_tokens = []
         generated_text_tokens = []
 
         if output_type == "both":
-            max_new_tokens = int(12.5 * 120) - audio_input_ids.shape[1]
+            max_new_tokens = int(12.5 * 120) - audio_input_ids.shape[1] # 1500 - 147 = 1353
         else:
             if max_new_tokens == -1:
                 max_new_tokens = 7500 - audio_input_ids.shape[1]
@@ -262,23 +263,26 @@ class KimiAudio(object):
             continous_feature=audio_features,
             output_type=output_type,
         )
+        
+        # generated_wav_tokens = [t for t in audio_input_ids if t >= self.kimia_token_offset]
 
         generated_wav_tokens = [
             t for t in generated_wav_tokens if t >= self.kimia_token_offset
-        ]  #  filter out the illegal tokens
+        ]  #  filter out the illegal tokens (1, 140)
 
         generated_wav_tokens = torch.tensor(generated_wav_tokens).unsqueeze(0)
         generated_wav_tokens = generated_wav_tokens - self.kimia_token_offset
 
         generated_text_tokens = [
             t for t in generated_text_tokens if t < self.kimia_token_offset
-        ]
+        ] # (37,)
         generated_text = self.detokenize_text(generated_text_tokens)
         if self.detokenizer is not None and output_type == "both":
             generated_wav = self.detokenize_audio(generated_wav_tokens)
         else:
             generated_wav = None
 
+        print(f"length of text tokens: {len(generated_text_tokens)}; length of audio tokens: {generated_wav_tokens.shape[1]}, length of wav: {generated_wav.shape[1] / 24000} seconds")
         return generated_wav, generated_text
 
     def detokenize_audio(self, audio_tokens):

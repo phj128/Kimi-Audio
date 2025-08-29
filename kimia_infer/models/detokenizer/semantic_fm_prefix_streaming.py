@@ -92,7 +92,7 @@ class StreamingSemanticFMWrapper:
 
         self.scheduler.set_timesteps(ode_steps)
 
-        semantic_tokens_chunk = semantic_tokens_chunk.unsqueeze(0).to(self.device)
+        semantic_tokens_chunk = semantic_tokens_chunk.unsqueeze(0).to(self.device) # (1, 120)
         xt_chunk = xt_chunk.unsqueeze(0).to(self.device).to(self.dtype)
 
         t_span = torch.linspace(0, 1, self.scheduler.timesteps)

@@ -130,12 +130,15 @@ class PrefixStreamingFlowMatchingDetokenizer:
     ):
         assert len(semantic_token.shape) == 2 and ode_step > 0
         assert semantic_token.shape[0] == 1
+        
+        # upsample_factor = 4
+        # always use <= 30 semantic tokens
 
-        semantic_token = semantic_token.repeat_interleave(upsample_factor, dim=1)
+        semantic_token = semantic_token.repeat_interleave(upsample_factor, dim=1) # (1, 120)
 
         semantic_token = semantic_token.squeeze(0)
 
-        if self.look_ahead_tokens != 0 and self.previous_chunk_left is not None:
+        if self.look_ahead_tokens != 0 and self.previous_chunk_left is not None: # self.look_ahead_tokens = 12
             semantic_token_previous = self.previous_chunk_left["semantic_token"]
             semantic_token = torch.cat(
                 [semantic_token_previous, semantic_token], dim=-1
@@ -145,7 +148,7 @@ class PrefixStreamingFlowMatchingDetokenizer:
             torch.randn(semantic_token.shape[0], 80)
             .to(semantic_token.device)
             .to(self.dtype)
-        )
+        ) # (120, 80)
 
         if self.look_ahead_tokens != 0 and self.previous_chunk_left is None:
             self.previous_chunk_left = {"semantic_token": None}
@@ -157,11 +160,11 @@ class PrefixStreamingFlowMatchingDetokenizer:
             ode_steps=ode_step,
             verbose=verbose,
             look_ahead_tokens=(
-                self.look_ahead_tokens * upsample_factor if not is_final else 0
+                self.look_ahead_tokens * upsample_factor if not is_final else 0 # 12 * 4 = 48
             ),
             cache=self.previous_chunk_left,
             ode_solver=ode_solver,
-        )
+        ) # (72, 80) for first run, 72 = 120 - 48. other runs: (120, 80)
 
         chunk_size = speech_mel.shape[0]
         length = speech_mel.shape[0]
@@ -179,7 +182,7 @@ class PrefixStreamingFlowMatchingDetokenizer:
 
         if self.pre_mel is None:  # first chunk, related to TTFB
             concat_mel = speech_mel
-            concat_reconstructed_wav = self.vocoder.decode_mel(concat_mel)
+            concat_reconstructed_wav = self.vocoder.decode_mel(concat_mel) # (1, 34560=72*480)
             if is_final:
                 self.clear_states()
                 self.state_dict_backup = None
@@ -187,17 +190,17 @@ class PrefixStreamingFlowMatchingDetokenizer:
             else:
                 reconstructed_wav = concat_reconstructed_wav[
                     :, : int(self.frame_size * chunk_size // 2)
-                ]  # return the first half chunk
+                ]  # return the first half chunk (1, 17280)
 
                 self.pre_wav = concat_reconstructed_wav[
                     :, -int(self.frame_size * chunk_size // 2) :
-                ]  # log the last half chunk for next generation step
-                self.pre_mel = speech_mel[-chunk_size // 2 :, :]
+                ]  # log the last half chunk for next generation step (1, 17280)
+                self.pre_mel = speech_mel[-chunk_size // 2 :, :] # (36, 80)
 
                 ret_wav = reconstructed_wav.float()
         else:
-            concat_mel = torch.cat([self.pre_mel, speech_mel], dim=0)
-            concat_reconstructed_wav = self.vocoder.decode_mel(concat_mel)
+            concat_mel = torch.cat([self.pre_mel, speech_mel], dim=0) # (156, 80)
+            concat_reconstructed_wav = self.vocoder.decode_mel(concat_mel) # (1, 74880=156*480)
 
             if is_final:
                 self.clear_states()
